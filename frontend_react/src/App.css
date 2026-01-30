@@ -1,0 +1,108 @@
+.App {
+  min-height: 100vh;
+  background: linear-gradient(135deg, rgba(55, 65, 81, 0.1) 0%, #f9fafb 100%);
+}
+
+.App-header {
+  background-color: #ffffff;
+  padding: 3rem 2rem;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.App-header h1 {
+  color: #374151;
+  margin: 0 0 0.5rem 0;
+  font-size: 2.5rem;
+  font-weight: 700;
+}
+
+.App-header p {
+  color: #9CA3AF;
+  margin: 0 0 2rem 0;
+  font-size: 1.125rem;
+}
+
+.status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background-color: #f9fafb;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+.status-dot.checking {
+  background-color: #9CA3AF;
+}
+
+.status-dot.connected {
+  background-color: #10B981;
+}
+
+.status-dot.unavailable {
+  background-color: #EF4444;
+}
+
+.status-dot.error {
+  background-color: #EF4444;
+}
+
+.status-text {
+  color: #374151;
+  font-size: 0.875rem;
+}
+
+.App-main {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 3rem 2rem;
+}
+
+.feature-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+}
+
+.feature-card {
+  background-color: #ffffff;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.feature-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 20px rgba(16, 185, 129, 0.15);
+}
+
+.feature-card h3 {
+  color: #374151;
+  margin: 0 0 0.75rem 0;
+  font-size: 1.25rem;
+}
+
+.feature-card p {
+  color: #9CA3AF;
+  margin: 0;
+  line-height: 1.5;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
