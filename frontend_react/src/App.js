@@ -6,15 +6,18 @@ import "./App.css";
 import { router } from "./routes/router";
 import { queryClient } from "./state/queryClient";
 import { GlobalErrorBoundary } from "./components/error/GlobalErrorBoundary";
+import { ToastProvider } from "./components/feedback/Toast";
 
 // PUBLIC_INTERFACE
 function App() {
   /** Root application component: provides React Query + Router + global error boundary. */
   return (
     <QueryClientProvider client={queryClient}>
-      <GlobalErrorBoundary>
-        <RouterProvider router={router} />
-      </GlobalErrorBoundary>
+      <ToastProvider>
+        <GlobalErrorBoundary>
+          <RouterProvider router={router} />
+        </GlobalErrorBoundary>
+      </ToastProvider>
     </QueryClientProvider>
   );
 }
