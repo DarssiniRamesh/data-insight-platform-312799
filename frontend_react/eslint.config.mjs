@@ -18,9 +18,7 @@ export default [
       }
     },
     rules: {
-
-     'no-unused-vars': ['error', { varsIgnorePattern: 'React|App' }]
-
+      "no-unused-vars": ["error", { varsIgnorePattern: "React|App|router|queryClient" }]
     }
   },
   pluginJs.configs.recommended,

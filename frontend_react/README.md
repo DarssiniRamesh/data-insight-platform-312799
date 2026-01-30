@@ -1,82 +1,59 @@
-# Lightweight React Template for KAVIA
+# Data Product Publishing Workflow (React V2 Scaffold)
 
-This project provides a minimal React template with a clean, modern UI and minimal dependencies.
+This React app is the initial scaffolding for the **V2 GxP-aligned Data Product Publishing workflow** UI (Draft → Validation → Approval → Publish).
 
-## Features
+It implements:
+- React Router routing and page shells
+- Shared layout (sidebar + top bar + environment badge)
+- API client structure aligned to `kavia-docs/data-product-publishing-workflow-openapi-v2.yaml`
+- Central error normalization with baseline handling for:
+  - `422 FreshnessCheckFailed`
+  - `422 GateComplianceFailed`
+  - `400 / 403 / 409 / 500` classes
+- TanStack React Query scaffolding (query client + provider)
+- Jest + React Testing Library baseline tests
 
-- **Lightweight**: No heavy UI frameworks - uses only vanilla CSS and React
-- **Modern UI**: Clean, responsive design with KAVIA brand styling
-- **Fast**: Minimal dependencies for quick loading times
-- **Simple**: Easy to understand and modify
+## Routes (V2 plan)
 
-## Getting Started
+- `/` → redirects to `/dashboard`
+- `/register` → Registration (Draft creation)
+- `/dashboard` → Approvals / Publishing dashboard (hub)
+- `/datasets/:draftId` → Dataset detail
+- `/datasets/:draftId/policies` → Access Policies editor
+- `/integrations` → Integrations (Collibra/Immuta)
+- `/audit` → Audit log viewer
+- `*` → Not found
 
-In the project directory, you can run:
+## Backend API configuration
 
-### `npm start`
+The backend is expected to run on port **3001**.
 
-Runs the app in development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+Create React App environment variable:
 
-### `npm test`
+- `REACT_APP_API_BASE_URL` (default: `http://localhost:3001`)
 
-Launches the test runner in interactive watch mode.
+Copy the example:
 
-### `npm run build`
-
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
-
-## Customization
-
-### Colors
-
-The main brand colors are defined as CSS variables in `src/App.css`:
-
-```css
-:root {
-  --kavia-orange: #E87A41;
-  --kavia-dark: #1A1A1A;
-  --text-color: #ffffff;
-  --text-secondary: rgba(255, 255, 255, 0.7);
-  --border-color: rgba(255, 255, 255, 0.1);
-}
+```bash
+cp .env.example .env.local
 ```
 
-### Components
+## Run locally
 
-This template uses pure HTML/CSS components instead of a UI framework. You can find component styles in `src/App.css`. 
+From this folder:
 
-Common components include:
-- Buttons (`.btn`, `.btn-large`)
-- Container (`.container`)
-- Navigation (`.navbar`)
-- Typography (`.title`, `.subtitle`, `.description`)
+```bash
+npm start
+```
 
-## Learn More
+App runs on http://localhost:3000
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+## Tests
 
-### Code Splitting
+```bash
+CI=true npm test
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+## Notes / TODOs (Traceability)
 
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+Each page includes TODO comments referencing requirement IDs (e.g., `DPR-V2-FR-010..015`) from the V2 plan to support future traceability and TDD.
