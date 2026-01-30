@@ -10,16 +10,30 @@ import { useToast } from "../components/feedback/Toast";
  * Registration page (draft creation).
  * Wires the UI to POST /v2/drafts.
  *
- * Requirements:
- * - Form fields: name, version, owner, domain, description,
- *   metadata.standards[], metadata.tags[], metadata.sourceSystems[], metadata.retentionDays
- * - Handle responses:
- *   - 201 -> navigate to Dataset Detail and show toast
- *   - 400 -> inline validation errors
- *   - 409 -> DuplicateResource banner
- *   - other -> normalized error display
+ * Backend contract (CreateDraftRequest) expects:
+ * Required fields:
+ * - product_name (string)
+ * - classification (enum): "Public" | "Internal" | "Confidential" | "Regulated"
+ * - schema_ref: { schema_id: string, schema_version: string }
+ * - dataset_ref: { uri: string, format?: string }
+ *
+ * Optional fields:
+ * - version (string, defaults backend-side)
+ * - update_frequency
+ * - max_age_hours
+ * - lineage
+ * - metadata { standards[], tags[], sourceSystems[], retentionDays }
+ *
+ * UI behavior:
+ * - Client-side required validation for the required fields above.
+ * - 201 -> navigate to Dataset Detail and show toast
+ * - 400 -> inline validation errors (best-effort mapping)
+ * - 409 -> DuplicateResource banner
+ * - other -> normalized error display
  * - Gate-aware messaging via GateFailureBanner for 422.
  */
+
+const CLASSIFICATION_OPTIONS = ["Public", "Internal", "Confidential", "Regulated"];
 
 // PUBLIC_INTERFACE
 export function RegistrationPage() {
@@ -28,11 +42,19 @@ export function RegistrationPage() {
   const toast = useToast();
 
   const [values, setValues] = useState({
-    name: "",
+    productName: "",
+    classification: "Internal",
+
+    schemaId: "",
+    schemaVersion: "",
+
+    datasetUri: "",
+    datasetFormat: "",
+
+    // Optional CreateDraftRequest fields
     version: "",
-    owner: "",
-    domain: "",
-    description: "",
+
+    // Optional metadata (keep from existing UI)
     standardsCsv: "",
     tagsCsv: "",
     sourceSystemsCsv: "",
@@ -84,7 +106,7 @@ export function RegistrationPage() {
       sourceSystems: parseCsv(values.sourceSystemsCsv),
       retentionDays: retention
     };
-  }, [values]);
+  }, [values.retentionDays, values.sourceSystemsCsv, values.standardsCsv, values.tagsCsv]);
 
   function setField(name, v) {
     setValues((prev) => ({ ...prev, [name]: v }));
@@ -92,11 +114,19 @@ export function RegistrationPage() {
 
   function validateClientSide() {
     const next = {};
-    if (!values.name.trim()) next.name = "Name is required.";
-    if (!values.version.trim()) next.version = "Version is required.";
-    if (!values.owner.trim()) next.owner = "Owner is required.";
-    if (!values.domain.trim()) next.domain = "Domain is required.";
 
+    if (!values.productName.trim()) next.productName = "Product name is required.";
+
+    if (!CLASSIFICATION_OPTIONS.includes(values.classification)) {
+      next.classification = "Classification must be one of: Public, Internal, Confidential, Regulated.";
+    }
+
+    if (!values.schemaId.trim()) next.schemaId = "Schema ID is required.";
+    if (!values.schemaVersion.trim()) next.schemaVersion = "Schema version is required.";
+
+    if (!values.datasetUri.trim()) next.datasetUri = "Dataset URI is required.";
+
+    // Optional numeric validation
     if (values.retentionDays !== "") {
       const n = Number(values.retentionDays);
       if (!Number.isFinite(n) || !Number.isInteger(n)) {
@@ -111,31 +141,44 @@ export function RegistrationPage() {
   }
 
   function mapApiFieldErrors(error) {
-    // Backend normalizer supports `fieldErrors` (array) under workflow envelope.
-    // We defensively handle a few shapes:
-    // - [{ field: "name", message: "..." }]
-    // - [{ field: "metadata.tags[0]", message: "..." }]
-    // - [{ loc: ["body","name"], msg: "..."}] (fastapi/pydantic-ish)
+    /**
+     * Backend normalizer supports `fieldErrors` (array) under workflow envelope.
+     * We defensively handle shapes:
+     * - [{ field: "product_name", message: "..." }]
+     * - [{ field: "schema_ref.schema_id", message: "..." }]
+     * - [{ loc: ["body","product_name"], msg: "..."}] (pydantic-ish)
+     */
     const next = {};
-
     const errs = Array.isArray(error?.fieldErrors) ? error.fieldErrors : [];
+
     for (const e of errs) {
       const field = e?.field || (Array.isArray(e?.loc) ? e.loc.slice(1).join(".") : null);
       const msg = e?.message || e?.msg || "Invalid value.";
       if (!field) continue;
 
-      // Map server fields to UI fields (basic mapping).
-      if (field === "name" || field === "product_name") next.name = msg;
-      else if (field === "version") next.version = msg;
-      else if (field === "owner") next.owner = msg;
-      else if (field === "domain") next.domain = msg;
-      else if (field === "description") next.description = msg;
-      else if (field.startsWith("metadata.retentionDays") || field === "metadata.retention_days") next.retentionDays = msg;
-      else if (field.startsWith("metadata.standards")) next.standardsCsv = msg;
-      else if (field.startsWith("metadata.tags")) next.tagsCsv = msg;
-      else if (field.startsWith("metadata.sourceSystems") || field.startsWith("metadata.source_systems"))
-        next.sourceSystemsCsv = msg;
-      else next[field] = msg;
+      // Map server fields to UI fields.
+      if (field === "product_name") next.productName = msg;
+      else if (field === "classification") next.classification = msg;
+      else if (field === "schema_ref" || field.startsWith("schema_ref.")) {
+        if (field.endsWith("schema_id")) next.schemaId = msg;
+        else if (field.endsWith("schema_version")) next.schemaVersion = msg;
+        else next.schemaId = msg;
+      } else if (field === "dataset_ref" || field.startsWith("dataset_ref.")) {
+        if (field.endsWith("uri")) next.datasetUri = msg;
+        else if (field.endsWith("format")) next.datasetFormat = msg;
+        else next.datasetUri = msg;
+      } else if (field === "version") next.version = msg;
+      else if (field === "metadata" || field.startsWith("metadata.")) {
+        if (field.includes("retentionDays") || field.includes("retention_days")) next.retentionDays = msg;
+        else if (field.includes("standards")) next.standardsCsv = msg;
+        else if (field.includes("tags")) next.tagsCsv = msg;
+        else if (field.includes("sourceSystems") || field.includes("source_systems")) next.sourceSystemsCsv = msg;
+      } else if (field === "name") {
+        // Back-compat: some backends/users may still send name in errors; map to productName.
+        next.productName = msg;
+      } else {
+        next[field] = msg;
+      }
     }
 
     return next;
@@ -148,20 +191,34 @@ export function RegistrationPage() {
     const ok = validateClientSide();
     if (!ok) return;
 
-    // NOTE: The backend contract is v2; field names are expected to match the backend schema.
-    // The request asked for fields (name, version, owner, domain, description, metadata.*).
+    // CreateDraftRequest mapping (authoritative schema from user_input_ref).
     const payload = {
-      name: values.name.trim(),
-      version: values.version.trim(),
-      owner: values.owner.trim(),
-      domain: values.domain.trim(),
-      description: values.description.trim() || null,
-      metadata: {
-        standards: parsed.standards,
-        tags: parsed.tags,
-        sourceSystems: parsed.sourceSystems,
-        retentionDays: parsed.retentionDays
-      }
+      product_name: values.productName.trim(),
+      classification: values.classification,
+      schema_ref: {
+        schema_id: values.schemaId.trim(),
+        schema_version: values.schemaVersion.trim()
+      },
+      dataset_ref: {
+        uri: values.datasetUri.trim(),
+        ...(values.datasetFormat.trim() ? { format: values.datasetFormat.trim() } : {})
+      },
+
+      ...(values.version.trim() ? { version: values.version.trim() } : {}),
+
+      ...(parsed.standards.length > 0 ||
+      parsed.tags.length > 0 ||
+      parsed.sourceSystems.length > 0 ||
+      parsed.retentionDays !== null
+        ? {
+            metadata: {
+              standards: parsed.standards,
+              tags: parsed.tags,
+              sourceSystems: parsed.sourceSystems,
+              retentionDays: parsed.retentionDays
+            }
+          }
+        : {})
     };
 
     try {
@@ -194,8 +251,7 @@ export function RegistrationPage() {
         <div className="alert alert--error inlineBanner" role="alert" aria-live="polite" data-testid="duplicate-banner">
           <div className="alert__title">Duplicate resource</div>
           <p className="alert__body">
-            A draft with this identity already exists. Update the version or choose a unique name/owner/domain
-            combination.
+            A draft with this identity already exists. Update identifying fields and try again.
           </p>
           {apiError?.correlationId ? (
             <p className="alert__body">
@@ -223,29 +279,157 @@ export function RegistrationPage() {
         <form onSubmit={onSubmit} aria-label="Registration form">
           <div className="formGrid">
             <div className="field">
-              <label className="field__label" htmlFor="name">
-                Name <span aria-hidden="true" style={{ color: "var(--c-error)" }}>*</span>
+              <label className="field__label" htmlFor="productName">
+                Product name <span aria-hidden="true" style={{ color: "var(--c-error)" }}>*</span>
               </label>
               <input
-                id="name"
+                id="productName"
                 className="input"
-                value={values.name}
-                onChange={(e) => setField("name", e.target.value)}
+                value={values.productName}
+                onChange={(e) => setField("productName", e.target.value)}
                 disabled={busy}
-                aria-invalid={Boolean(mergedErrors.name)}
-                aria-describedby={mergedErrors.name ? "name-error" : undefined}
-                placeholder="e.g., Customer Orders"
+                aria-invalid={Boolean(mergedErrors.productName)}
+                aria-describedby={mergedErrors.productName ? "productName-error" : "productName-hint"}
+                placeholder="e.g., adverse_events_agg_v1"
               />
-              {mergedErrors.name ? (
-                <div id="name-error" className="fieldError">
-                  {mergedErrors.name}
+              <div id="productName-hint" className="field__hint">
+                Backend field: <code>product_name</code>.
+              </div>
+              {mergedErrors.productName ? (
+                <div id="productName-error" className="fieldError">
+                  {mergedErrors.productName}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="field">
+              <label className="field__label" htmlFor="classification">
+                Classification <span aria-hidden="true" style={{ color: "var(--c-error)" }}>*</span>
+              </label>
+              <select
+                id="classification"
+                className="input"
+                value={values.classification}
+                onChange={(e) => setField("classification", e.target.value)}
+                disabled={busy}
+                aria-invalid={Boolean(mergedErrors.classification)}
+                aria-describedby={mergedErrors.classification ? "classification-error" : "classification-hint"}
+              >
+                {CLASSIFICATION_OPTIONS.map((opt) => (
+                  <option value={opt} key={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+              <div id="classification-hint" className="field__hint">
+                Must be one of: Public, Internal, Confidential, Regulated.
+              </div>
+              {mergedErrors.classification ? (
+                <div id="classification-error" className="fieldError">
+                  {mergedErrors.classification}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="field">
+              <label className="field__label" htmlFor="schemaId">
+                Schema ID <span aria-hidden="true" style={{ color: "var(--c-error)" }}>*</span>
+              </label>
+              <input
+                id="schemaId"
+                className="input"
+                value={values.schemaId}
+                onChange={(e) => setField("schemaId", e.target.value)}
+                disabled={busy}
+                aria-invalid={Boolean(mergedErrors.schemaId)}
+                aria-describedby={mergedErrors.schemaId ? "schemaId-error" : "schemaId-hint"}
+                placeholder="e.g., adverse-events-schema"
+              />
+              <div id="schemaId-hint" className="field__hint">
+                Backend field: <code>schema_ref.schema_id</code>.
+              </div>
+              {mergedErrors.schemaId ? (
+                <div id="schemaId-error" className="fieldError">
+                  {mergedErrors.schemaId}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="field">
+              <label className="field__label" htmlFor="schemaVersion">
+                Schema version <span aria-hidden="true" style={{ color: "var(--c-error)" }}>*</span>
+              </label>
+              <input
+                id="schemaVersion"
+                className="input"
+                value={values.schemaVersion}
+                onChange={(e) => setField("schemaVersion", e.target.value)}
+                disabled={busy}
+                aria-invalid={Boolean(mergedErrors.schemaVersion)}
+                aria-describedby={mergedErrors.schemaVersion ? "schemaVersion-error" : "schemaVersion-hint"}
+                placeholder="e.g., 1.0.0"
+              />
+              <div id="schemaVersion-hint" className="field__hint">
+                Backend field: <code>schema_ref.schema_version</code>.
+              </div>
+              {mergedErrors.schemaVersion ? (
+                <div id="schemaVersion-error" className="fieldError">
+                  {mergedErrors.schemaVersion}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="field" style={{ gridColumn: "1 / -1" }}>
+              <label className="field__label" htmlFor="datasetUri">
+                Dataset URI <span aria-hidden="true" style={{ color: "var(--c-error)" }}>*</span>
+              </label>
+              <input
+                id="datasetUri"
+                className="input"
+                value={values.datasetUri}
+                onChange={(e) => setField("datasetUri", e.target.value)}
+                disabled={busy}
+                aria-invalid={Boolean(mergedErrors.datasetUri)}
+                aria-describedby={mergedErrors.datasetUri ? "datasetUri-error" : "datasetUri-hint"}
+                placeholder="e.g., s3://bucket/adverse_events/"
+              />
+              <div id="datasetUri-hint" className="field__hint">
+                Backend field: <code>dataset_ref.uri</code>.
+              </div>
+              {mergedErrors.datasetUri ? (
+                <div id="datasetUri-error" className="fieldError">
+                  {mergedErrors.datasetUri}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="field">
+              <label className="field__label" htmlFor="datasetFormat">
+                Dataset format
+              </label>
+              <input
+                id="datasetFormat"
+                className="input"
+                value={values.datasetFormat}
+                onChange={(e) => setField("datasetFormat", e.target.value)}
+                disabled={busy}
+                aria-invalid={Boolean(mergedErrors.datasetFormat)}
+                aria-describedby={mergedErrors.datasetFormat ? "datasetFormat-error" : "datasetFormat-hint"}
+                placeholder="e.g., parquet (optional)"
+              />
+              <div id="datasetFormat-hint" className="field__hint">
+                Optional. Backend field: <code>dataset_ref.format</code>.
+              </div>
+              {mergedErrors.datasetFormat ? (
+                <div id="datasetFormat-error" className="fieldError">
+                  {mergedErrors.datasetFormat}
                 </div>
               ) : null}
             </div>
 
             <div className="field">
               <label className="field__label" htmlFor="version">
-                Version <span aria-hidden="true" style={{ color: "var(--c-error)" }}>*</span>
+                Version
               </label>
               <input
                 id="version"
@@ -254,78 +438,15 @@ export function RegistrationPage() {
                 onChange={(e) => setField("version", e.target.value)}
                 disabled={busy}
                 aria-invalid={Boolean(mergedErrors.version)}
-                aria-describedby={mergedErrors.version ? "version-error" : undefined}
-                placeholder="e.g., 1.0.0"
+                aria-describedby={mergedErrors.version ? "version-error" : "version-hint"}
+                placeholder='e.g., 1.0.0 (optional; backend defaults to "v1.0")'
               />
+              <div id="version-hint" className="field__hint">
+                Optional. Backend field: <code>version</code>.
+              </div>
               {mergedErrors.version ? (
                 <div id="version-error" className="fieldError">
                   {mergedErrors.version}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="field">
-              <label className="field__label" htmlFor="owner">
-                Owner <span aria-hidden="true" style={{ color: "var(--c-error)" }}>*</span>
-              </label>
-              <input
-                id="owner"
-                className="input"
-                value={values.owner}
-                onChange={(e) => setField("owner", e.target.value)}
-                disabled={busy}
-                aria-invalid={Boolean(mergedErrors.owner)}
-                aria-describedby={mergedErrors.owner ? "owner-error" : undefined}
-                placeholder="e.g., data-platform@company.com"
-              />
-              {mergedErrors.owner ? (
-                <div id="owner-error" className="fieldError">
-                  {mergedErrors.owner}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="field">
-              <label className="field__label" htmlFor="domain">
-                Domain <span aria-hidden="true" style={{ color: "var(--c-error)" }}>*</span>
-              </label>
-              <input
-                id="domain"
-                className="input"
-                value={values.domain}
-                onChange={(e) => setField("domain", e.target.value)}
-                disabled={busy}
-                aria-invalid={Boolean(mergedErrors.domain)}
-                aria-describedby={mergedErrors.domain ? "domain-error" : undefined}
-                placeholder="e.g., Sales"
-              />
-              {mergedErrors.domain ? (
-                <div id="domain-error" className="fieldError">
-                  {mergedErrors.domain}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="field" style={{ gridColumn: "1 / -1" }}>
-              <label className="field__label" htmlFor="description">
-                Description
-              </label>
-              <textarea
-                id="description"
-                className="textarea"
-                value={values.description}
-                onChange={(e) => setField("description", e.target.value)}
-                disabled={busy}
-                aria-invalid={Boolean(mergedErrors.description)}
-                aria-describedby={mergedErrors.description ? "description-error" : "description-hint"}
-                placeholder="What is this dataset for? Who uses it?"
-              />
-              <div id="description-hint" className="field__hint">
-                Optional. Keep it short and specific (intended use, key constraints).
-              </div>
-              {mergedErrors.description ? (
-                <div id="description-error" className="fieldError">
-                  {mergedErrors.description}
                 </div>
               ) : null}
             </div>
@@ -342,10 +463,10 @@ export function RegistrationPage() {
                 disabled={busy}
                 aria-invalid={Boolean(mergedErrors.standardsCsv)}
                 aria-describedby={mergedErrors.standardsCsv ? "standards-error" : "standards-hint"}
-                placeholder="e.g., GxP, GDPR"
+                placeholder="e.g., ICH E2B(R3), IDMP"
               />
               <div id="standards-hint" className="field__hint">
-                Comma-separated list.
+                Optional. Comma-separated list (metadata.standards).
               </div>
               {mergedErrors.standardsCsv ? (
                 <div id="standards-error" className="fieldError">
@@ -366,10 +487,10 @@ export function RegistrationPage() {
                 disabled={busy}
                 aria-invalid={Boolean(mergedErrors.tagsCsv)}
                 aria-describedby={mergedErrors.tagsCsv ? "tags-error" : "tags-hint"}
-                placeholder="e.g., pii, finance"
+                placeholder="e.g., safety, pv, agg"
               />
               <div id="tags-hint" className="field__hint">
-                Comma-separated list.
+                Optional. Comma-separated list (metadata.tags).
               </div>
               {mergedErrors.tagsCsv ? (
                 <div id="tags-error" className="fieldError">
@@ -390,10 +511,10 @@ export function RegistrationPage() {
                 disabled={busy}
                 aria-invalid={Boolean(mergedErrors.sourceSystemsCsv)}
                 aria-describedby={mergedErrors.sourceSystemsCsv ? "sources-error" : "sources-hint"}
-                placeholder="e.g., SAP, Salesforce"
+                placeholder="e.g., safety-db"
               />
               <div id="sources-hint" className="field__hint">
-                Comma-separated list.
+                Optional. Comma-separated list (metadata.sourceSystems).
               </div>
               {mergedErrors.sourceSystemsCsv ? (
                 <div id="sources-error" className="fieldError">
@@ -415,7 +536,7 @@ export function RegistrationPage() {
                 disabled={busy}
                 aria-invalid={Boolean(mergedErrors.retentionDays)}
                 aria-describedby={mergedErrors.retentionDays ? "retention-error" : "retention-hint"}
-                placeholder="e.g., 365"
+                placeholder="e.g., 730"
               />
               <div id="retention-hint" className="field__hint">
                 Optional integer. Use 0 for “no retention constraint”.
@@ -438,11 +559,13 @@ export function RegistrationPage() {
               disabled={busy}
               onClick={() => {
                 setValues({
-                  name: "",
+                  productName: "",
+                  classification: "Internal",
+                  schemaId: "",
+                  schemaVersion: "",
+                  datasetUri: "",
+                  datasetFormat: "",
                   version: "",
-                  owner: "",
-                  domain: "",
-                  description: "",
                   standardsCsv: "",
                   tagsCsv: "",
                   sourceSystemsCsv: "",
@@ -468,3 +591,180 @@ export function RegistrationPage() {
     </div>
   );
 }
+
+`````
+
+Explanation: Update Registration page tests to match new required fields and ensure createDraft is called with CreateDraftRequest-shaped payload.
+````write file="data-insight-platform-312799/frontend_react/src/pages/RegistrationPage.test.js"
+import React from "react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter, Routes, Route } from "react-router-dom";
+
+import { RegistrationPage } from "./RegistrationPage";
+import { ToastProvider } from "../components/feedback/Toast";
+import { v2WorkflowApi } from "../api/v2WorkflowApi";
+
+jest.mock("../api/v2WorkflowApi", () => ({
+  v2WorkflowApi: {
+    createDraft: jest.fn()
+  }
+}));
+
+function renderWithProviders(ui, { initialEntries = ["/register"] } = {}) {
+  const qc = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false }
+    }
+  });
+
+  return render(
+    <QueryClientProvider client={qc}>
+      <ToastProvider>
+        <MemoryRouter initialEntries={initialEntries}>
+          <Routes>
+            <Route path="/register" element={ui} />
+            <Route path="/datasets/:draftId" element={<div>Dataset detail page</div>} />
+          </Routes>
+        </MemoryRouter>
+      </ToastProvider>
+    </QueryClientProvider>
+  );
+}
+
+test("client-side required validations block submit", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<RegistrationPage />);
+
+  await user.click(screen.getByTestId("submit-btn"));
+
+  expect(await screen.findByText(/Product name is required/i)).toBeInTheDocument();
+  expect(screen.getByText(/Schema ID is required/i)).toBeInTheDocument();
+  expect(screen.getByText(/Schema version is required/i)).toBeInTheDocument();
+  expect(screen.getByText(/Dataset URI is required/i)).toBeInTheDocument();
+
+  expect(v2WorkflowApi.createDraft).not.toHaveBeenCalled();
+});
+
+test("successful submit calls POST /v2/drafts with CreateDraftRequest payload and navigates to dataset detail + shows toast", async () => {
+  const user = userEvent.setup();
+  v2WorkflowApi.createDraft.mockResolvedValueOnce({ draft_id: "d_123", status: "DRAFT" });
+
+  renderWithProviders(<RegistrationPage />);
+
+  await user.type(screen.getByLabelText(/^Product name/i), "adverse_events_agg_v1");
+  await user.selectOptions(screen.getByLabelText(/^Classification/i), "Internal");
+  await user.type(screen.getByLabelText(/^Schema ID/i), "adverse-events-schema");
+  await user.type(screen.getByLabelText(/^Schema version/i), "1.0.0");
+  await user.type(screen.getByLabelText(/^Dataset URI/i), "s3://bucket/adverse_events/");
+  await user.type(screen.getByLabelText(/^Dataset format/i), "parquet");
+
+  await user.type(screen.getByLabelText(/^Version$/i), "1.0.0");
+  await user.type(screen.getByLabelText(/Standards/i), "ICH E2B(R3), IDMP");
+  await user.type(screen.getByLabelText(/^Tags/i), "safety, pv, agg");
+  await user.type(screen.getByLabelText(/Source systems/i), "safety-db");
+  await user.type(screen.getByLabelText(/Retention days/i), "730");
+
+  await user.click(screen.getByTestId("submit-btn"));
+
+  await waitFor(() => expect(v2WorkflowApi.createDraft).toHaveBeenCalledTimes(1));
+
+  expect(v2WorkflowApi.createDraft).toHaveBeenCalledWith({
+    product_name: "adverse_events_agg_v1",
+    classification: "Internal",
+    schema_ref: {
+      schema_id: "adverse-events-schema",
+      schema_version: "1.0.0"
+    },
+    dataset_ref: {
+      uri: "s3://bucket/adverse_events/",
+      format: "parquet"
+    },
+    version: "1.0.0",
+    metadata: {
+      standards: ["ICH E2B(R3)", "IDMP"],
+      tags: ["safety", "pv", "agg"],
+      sourceSystems: ["safety-db"],
+      retentionDays: 730
+    }
+  });
+
+  // Navigated route content
+  expect(await screen.findByText(/Dataset detail page/i)).toBeInTheDocument();
+
+  // Toast content
+  expect(await screen.findByText(/Draft created/i)).toBeInTheDocument();
+  expect(screen.getByText(/Draft ID: d_123/i)).toBeInTheDocument();
+});
+
+test("400 error shows inline validation errors (product_name mapping)", async () => {
+  const user = userEvent.setup();
+  v2WorkflowApi.createDraft.mockRejectedValueOnce({
+    name: "NormalizedApiError",
+    httpStatus: 400,
+    code: "InvalidInput",
+    message: "Invalid input.",
+    fieldErrors: [{ field: "product_name", message: "Product name contains invalid characters." }]
+  });
+
+  renderWithProviders(<RegistrationPage />);
+
+  await user.type(screen.getByLabelText(/^Product name/i), "!!!");
+  await user.type(screen.getByLabelText(/^Schema ID/i), "schema-x");
+  await user.type(screen.getByLabelText(/^Schema version/i), "1.0.0");
+  await user.type(screen.getByLabelText(/^Dataset URI/i), "s3://bucket/path/");
+
+  await user.click(screen.getByTestId("submit-btn"));
+
+  expect(await screen.findByText(/invalid characters/i)).toBeInTheDocument();
+});
+
+test("409 shows duplicate banner", async () => {
+  const user = userEvent.setup();
+  v2WorkflowApi.createDraft.mockRejectedValueOnce({
+    name: "NormalizedApiError",
+    httpStatus: 409,
+    code: "DuplicateResource",
+    message: "Duplicate."
+  });
+
+  renderWithProviders(<RegistrationPage />);
+
+  await user.type(screen.getByLabelText(/^Product name/i), "adverse_events_agg_v1");
+  await user.type(screen.getByLabelText(/^Schema ID/i), "adverse-events-schema");
+  await user.type(screen.getByLabelText(/^Schema version/i), "1.0.0");
+  await user.type(screen.getByLabelText(/^Dataset URI/i), "s3://bucket/adverse_events/");
+
+  await user.click(screen.getByTestId("submit-btn"));
+
+  expect(await screen.findByTestId("duplicate-banner")).toBeInTheDocument();
+  expect(screen.getByText(/Duplicate resource/i)).toBeInTheDocument();
+});
+
+test("non-4xx/non-422 error shows normalized generic error banner", async () => {
+  const user = userEvent.setup();
+  v2WorkflowApi.createDraft.mockRejectedValueOnce({
+    name: "NormalizedApiError",
+    httpStatus: 500,
+    code: "InternalError",
+    message: "Something failed.",
+    correlationId: "corr_1"
+  });
+
+  renderWithProviders(<RegistrationPage />);
+
+  await user.type(screen.getByLabelText(/^Product name/i), "adverse_events_agg_v1");
+  await user.type(screen.getByLabelText(/^Schema ID/i), "adverse-events-schema");
+  await user.type(screen.getByLabelText(/^Schema version/i), "1.0.0");
+  await user.type(screen.getByLabelText(/^Dataset URI/i), "s3://bucket/adverse_events/");
+
+  await user.click(screen.getByTestId("submit-btn"));
+
+  expect(await screen.findByTestId("generic-error")).toBeInTheDocument();
+  expect(screen.getByText(/Request failed/i)).toBeInTheDocument();
+  expect(screen.getByText(/Something failed/i)).toBeInTheDocument();
+  expect(screen.getByText(/corr_1/i)).toBeInTheDocument();
+});
+
